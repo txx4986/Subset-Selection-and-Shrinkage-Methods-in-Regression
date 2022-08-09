@@ -1,0 +1,337 @@
+---
+title: "Test with noise"
+output: html_notebook
+---
+## Generate data
+```{r}
+set.seed(42)
+
+#generate features
+n <- 100
+p <- 50
+real_p <- 15
+X <- matrix(rnorm(n*p), nrow=n, ncol=p)
+colnames(X) <- paste0("feature_", seq(1:50))
+X_df <- as_tibble(X)
+
+# generate betas
+B_1 <- replicate(35, 0)
+B_2 <- runif(n=15, min=1, max=3)
+true_betas <- sample(c(B_1, B_2))
+names(true_betas) <- paste0("feature_", seq(1:50))
+true_betas_df <- true_betas %>% t() %>% as_tibble() %>% gather(variable_name, value)
+
+# calculate y and add noise
+Y_mean <- X%*%true_betas
+Y_observed <- Y_mean + rnorm(100, mean=0, sd=1)
+colnames(Y_observed) <- "Y_observed"
+Y_df <- as_tibble(Y_observed)
+
+# bind in df
+data <- bind_cols(Y_df, X_df)
+```
+
+```{r}
+# define Euclidean distance
+# should intercept be included in calculation of euclidean norm?
+euclidean <- function(a, b) sqrt(sum((a - b)^2))
+```
+
+
+## Method 1: olsrr
+```{r}
+# function to extract coefficients
+coefs <- function(fit){
+  fit_coefs <- fit$model$coefficients %>% t() %>% as_tibble() %>% gather(variable_name, value)
+  fit_coefs <- fit_coefs[-c(1),]
+  fit_coefs <- fit_coefs %>% add_column(id = 0)
+  for (i in 1:50){
+    if (!(paste0("feature_", i)%in%fit_coefs$variable_name)){
+      fit_coefs <- fit_coefs %>% add_row(variable_name = paste0("feature_", i), value = 0)
+    }
+    fit_coefs[i,3] <- as.numeric(str_split(fit_coefs[i,1], "_")[[1]][2])
+  }
+  fit_coefs <- fit_coefs %>% arrange(id)
+  fit_coefs <- fit_coefs[,-c(3)] 
+  return(fit_coefs)
+}
+```
+
+```{r}
+library(olsrr)
+# Forward regression using p-values
+# How to choose the p-value?
+model <- lm(Y_observed~., data=data)
+FWDfit.p <- ols_step_forward_p(model, penter=0.05)
+FWDfit.p
+```
+```{r}
+FWDfit.p_coefs <- coefs(FWDfit.p)
+FWDfit.p_euclidean <- euclidean(true_betas_df$value, FWDfit.p_coefs$value)
+FWDfit.p_euclidean
+```
+
+```{r}
+plot(FWDfit.p)
+```
+
+```{r}
+# Forward Regression using aic
+FWDfit.aic <- ols_step_forward_aic(model)
+FWDfit.aic
+```
+
+
+```{r}
+FWDfit.aic_coefs <- coefs(FWDfit.aic)
+FWDfit.aic_euclidean <- euclidean(true_betas_df$value, FWDfit.aic_coefs$value)
+FWDfit.aic_euclidean
+```
+
+```{r}
+plot(FWDfit.aic)
+```
+
+
+```{r}
+# Backward regression using p-values
+BWDfit.p <- ols_step_backward_p(model, prem=0.05)
+BWDfit.p
+```
+
+```{r}
+BWDfit.p_coefs <- coefs(BWDfit.p)
+BWDfit.p_euclidean <- euclidean(true_betas_df$value, BWDfit.p_coefs$value)
+BWDfit.p_euclidean
+```
+
+```{r}
+plot(BWDfit.p)
+```
+
+```{r}
+# Backward regression using aic
+BWDfit.aic <- ols_step_backward_aic(model)
+BWDfit.aic
+```
+
+```{r}
+BWDfit.aic_coefs <- coefs(BWDfit.aic)
+BWDfit.aic_euclidean <- euclidean(true_betas_df$value, BWDfit.aic_coefs$value)
+BWDfit.aic_euclidean
+```
+
+```{r}
+plot(BWDfit.aic)
+```
+
+```{r}
+# Stepwise regression using p-values
+Bothfit.p <- ols_step_both_p(model, pent=0.05, prem=0.05)
+Bothfit.p
+```
+
+```{r}
+Bothfit.p_coefs <- coefs(Bothfit.p)
+Bothfit.p_euclidean <- euclidean(true_betas_df$value, Bothfit.p_coefs$value)
+Bothfit.p_euclidean
+```
+
+```{r}
+plot(Bothfit.p)
+```
+
+```{r}
+# Stepwise regression using aic
+Bothfit.aic <- ols_step_both_aic(model)
+Bothfit.aic
+```
+
+```{r}
+plot(Bothfit.aic)
+```
+
+## Method 2: step
+```{r}
+# function to extract coefficients
+coefs2 <- function(fit){
+  fit_coefs <- fit$coefficients %>% t() %>% as_tibble() %>% gather(variable_name, value)
+  fit_coefs <- fit_coefs[-c(1),]
+  fit_coefs <- fit_coefs %>% add_column(id = 0)
+  for (i in 1:50){
+    if (!(paste0("feature_", i)%in%fit_coefs$variable_name)){
+      fit_coefs <- fit_coefs %>% add_row(variable_name = paste0("feature_", i), value = 0)
+    }
+    fit_coefs[i,3] <- as.numeric(str_split(fit_coefs[i,1], "_")[[1]][2])
+  }
+  fit_coefs <- fit_coefs %>% arrange(id)
+  fit_coefs <- fit_coefs[,-c(3)] 
+  return(fit_coefs)
+}
+```
+
+```{r}
+# Forward stepwise
+forward_step <- step(lm(Y_observed~1, data=data), scope=list(upper=lm(Y_observed~., data=data)), direction="forward", trace=FALSE)
+forward_step
+```
+
+```{r}
+forward_step_coefs <- coefs2(forward_step)
+forward_step_euclidean <- euclidean(true_betas_df$value, forward_step_coefs$value)
+forward_step_euclidean
+```
+
+
+```{r}
+plot(forward_step)
+```
+
+```{r}
+# Backward stepwise
+backward_step <- step(lm(Y_observed~., data=data), scope=list(lower=lm(Y_observed~1, data=data)), direction="backward", trace=FALSE)
+backward_step
+```
+
+```{r}
+backward_step_coefs <- coefs2(backward_step)
+backward_step_euclidean <- euclidean(true_betas_df$value, backward_step_coefs$value)
+backward_step_euclidean
+```
+
+```{r}
+plot(backward_step)
+```
+
+```{r}
+# Stepwise
+stepwise_step <- step(lm(Y_observed~., data=data), direction="both", trace=FALSE)
+stepwise_step
+```
+
+```{r}
+stepwise_step_coefs <- coefs2(stepwise_step)
+stepwise_step_euclidean <- euclidean(true_betas_df$value, stepwise_step_coefs$value)
+stepwise_step_euclidean
+```
+
+```{r}
+plot(stepwise_step)
+```
+
+## Method 3: train
+```{r}
+# function to extract coefficients
+coefs3 <- function(fit, bestTune){
+  fit_coefs <- coef(fit$finalModel, bestTune) %>% t() %>% as_tibble() %>% gather(variable_name, value)
+  fit_coefs <- fit_coefs[-c(1),]
+  fit_coefs <- fit_coefs %>% add_column(id = 0)
+  for (i in 1:50){
+    if (!(paste0("feature_", i)%in%fit_coefs$variable_name)){
+      fit_coefs <- fit_coefs %>% add_row(variable_name = paste0("feature_", i), value = 0)
+    }
+    fit_coefs[i,3] <- as.numeric(str_split(fit_coefs[i,1], "_")[[1]][2])
+  }
+  fit_coefs <- fit_coefs %>% arrange(id)
+  fit_coefs <- fit_coefs[,-c(3)] 
+  return(fit_coefs)
+}
+```
+
+```{r}
+# forward stepwise
+set.seed(42)
+# Set up repeated k-fold cross-validation
+train_control <- trainControl(method="cv", number=10)
+# Train the model
+forward_train <- train(Y_observed~., data=data, method="leapForward", tuneGrid=data.frame(nvmax=1:50), trControl=train_control)
+forward_train$results
+```
+
+```{r}
+forward_train$bestTune
+```
+
+```{r}
+forward_train_coefs <- coefs3(forward_train, 15)
+forward_train_euclidean <- euclidean(true_betas_df$value, forward_train_coefs$value)
+forward_train_euclidean
+```
+
+```{r}
+plot(forward_train)
+```
+
+```{r}
+# backward stepwise
+set.seed(42)
+# Set up repeated k-fold cross-validation
+train_control <- trainControl(method="cv", number=10)
+# Train the model
+backward_train <- train(Y_observed~., data=data, method="leapBackward", tuneGrid=data.frame(nvmax=1:50), trControl=train_control)
+backward_train$results
+```
+
+```{r}
+backward_train$bestTune
+```
+
+```{r}
+backward_train_coefs <- coefs3(backward_train, 15)
+backward_train_euclidean <- euclidean(true_betas_df$value, backward_train_coefs$value)
+backward_train_euclidean
+```
+
+```{r}
+plot(backward_train)
+```
+
+```{r}
+# Stepwise
+set.seed(42)
+# Set up repeated k-fold cross-validation
+train_control <- trainControl(method="cv", number=10)
+# Train the model
+stepwise_train <- train(Y_observed~., data=data, method="leapSeq", tuneGrid=data.frame(nvmax=1:50), trControl=train_control)
+stepwise_train$results
+```
+
+```{r}
+stepwise_train$bestTune
+```
+
+```{r}
+stepwise_train_coefs <- coefs3(stepwise_train, 20)
+stepwise_train_euclidean <- euclidean(true_betas_df$value, stepwise_train_coefs$value)
+stepwise_train_euclidean
+```
+
+```{r}
+plot(stepwise_train)
+```
+
+## Summary
+```{r}
+Method <- c("FWDfit.p", "FWDfit.aic", "BWDfit.p", "BWDfit.aic", "Bothfit.p", "Bothfit.aic", "forward_step", "backward_step", "stepwise_step", "forward_train", "backward_train", "stepwise_train")
+Euclidean_norm <- c(FWDfit.p_euclidean, FWDfit.aic_euclidean, BWDfit.p_euclidean, BWDfit.aic_euclidean, Bothfit.p_euclidean, NaN, forward_step_euclidean, backward_step_euclidean, stepwise_step_euclidean, forward_train_euclidean, backward_train_euclidean, stepwise_train_euclidean)
+df <- data.frame(Method, Euclidean_norm)
+df
+```
+# true positive rate
+# false discovery rate
+
+```{r}
+Step <- c(1:26)
+FWD_rss <- FWDfit.aic$rss
+BWD_rss <- BWDfit.aic$rss %>% append(NaN)
+Both_rss <- Bothfit.aic$rss
+df_rss <- data.frame(Step, FWD_rss, BWD_rss, Both_rss)
+ggplot(df_rss, aes(Step)) +
+  geom_line(aes(y=FWD_rss), colour='red')+
+  geom_line(aes(y=BWD_rss), colour='green')+
+  geom_line(aes(y=Both_rss), colour='blue')+
+  geom_point(aes(y=FWD_rss), colour='red')+
+  geom_point(aes(y=BWD_rss), colour='green')+
+  geom_point(aes(y=Both_rss), colour='blue')
+```
+

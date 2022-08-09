@@ -1,0 +1,694 @@
+---
+title: "Ozone Interaction Data"
+output: html_notebook
+---
+
+## Load and Scale dataset
+```{r}
+data(ozoneI, package = "spikeslab")
+df <- as.data.frame(scale(ozoneI))
+```
+
+## Function for plotting linear models
+
+```{r}
+rsquared <- function(test.preds, test.labels) {
+    return(round(cor(test.preds, test.labels)^2, 3))
+}
+plot.linear.model1 <- function(model, test.preds = NULL, test.labels = NULL, 
+                            test.only = FALSE) {
+    # ensure that model is interpreted as a GLM
+    pred <- model$fitted.values
+    obs <- model$model[,1]
+    if (test.only) {
+        # plot only the results for the test set
+        plot.df <- NULL
+        plot.res.df <- NULL
+    } else {
+        plot.df <- data.frame("Fitted_Values" = pred, "Actual_Values" = obs, 
+                                "DataSet" = "training")
+        model.residuals <- obs - pred
+        plot.res.df <- data.frame("x" = obs, "y" = pred, 
+                        "x1" = obs, "y2" = pred + model.residuals,
+                        "DataSet" = "training")
+    }
+    r.squared <- NULL
+    if (!is.null(test.preds) && !is.null(test.labels)) {
+        # store predicted points: 
+        test.df <- data.frame("Fitted_Values" = test.preds, 
+                            "Actual_Values" = test.labels, "DataSet" = "test")
+        # store residuals for predictions on the test data
+        test.residuals <- test.labels - test.preds
+        test.res.df <- data.frame("x" = test.labels, "y" = test.preds,
+                        "x1" = test.labels, "y2" = test.preds + test.residuals,
+                         "DataSet" = "test")
+        # append to existing data
+        plot.df <- rbind(plot.df, test.df)
+        plot.res.df <- rbind(plot.res.df, test.res.df)
+        # annotate model with R^2 value
+        r.squared <- rsquared(test.preds, test.labels)
+    }
+    #######
+    library(ggplot2)
+    p <- ggplot() + 
+        # plot training samples
+        geom_point(data = plot.df, 
+            aes(x = Actual_Values, y = Fitted_Values, color=DataSet)) +
+        # plot residuals
+        geom_segment(data = plot.res.df, alpha = 0.2,
+            aes(x = x, y = y, xend = x1, yend = y2, group = DataSet)) +
+        # plot optimal regressor
+        geom_abline(color = "red", slope = 1) +
+        xlim(-1.5,3.5)
+    if (!is.null(r.squared)) {
+        # plot r squared of predictions
+        max.val <- max(plot.df$Actual_Values, plot.df$Fitted.Values)
+        x.pos <- 0.2 * max.val
+        y.pos <- 0.9 * max.val
+        label <- paste0("R^2: ", r.squared)
+        p <- p + annotate("text", x = x.pos, y = y.pos, label = label, size = 5)
+    }
+    return(p)
+}
+```
+
+## Full model
+```{r}
+full_model <- lm(df$ozone~., df)
+test.preds <- predict(full_model, newdata=df[,2:135])
+test.labels <- df$ozone
+p.full <- plot.linear.model1(full_model, test.preds, test.labels)
+p.full
+```
+```{r}
+full_model
+```
+
+
+## Forward stepwise
+```{r}
+forward_step <- step(lm(df$ozone~1, data=df), scope=list(upper=lm(df$ozone~., data=df)), direction="forward", trace=FALSE)
+forward_step
+```
+
+```{r}
+test.preds <- predict(forward_step, newdata=df[,2:135])
+test.labels <- df$ozone
+p.forward <- plot.linear.model1(forward_step, test.preds, test.labels)
+p.forward
+```
+
+```{r}
+plot(forward_step$anova$AIC, xlab="Step", ylab="AIC")
+```
+
+## Backward stepwise
+```{r}
+backward_step <- step(lm(df$ozone~., data=df), scope=list(lower=lm(df$ozone~1, data=df)), direction="backward", trace=FALSE)
+backward_step
+```
+```{r}
+length(backward_step$coefficients)-1
+```
+
+
+```{r}
+test.preds <- predict(backward_step, newdata=df[,2:135])
+test.labels <- df$ozone
+p.backward <- plot.linear.model1(backward_step, test.preds, test.labels)
+p.backward
+```
+
+```{r}
+plot(backward_step$anova$AIC, xlab="Step", ylab="AIC")
+```
+
+## Stepwise
+```{r}
+stepwise <- step(lm(df$ozone~1, data=df), scope=list(lower=lm(df$ozone~1, data=df), upper=lm(df$ozone~., data=df)), direction="both", trace=FALSE)
+stepwise
+```
+
+```{r}
+test.preds <- predict(stepwise, newdata=df[,2:135])
+test.labels <- df$ozone
+p.stepwise <- plot.linear.model1(stepwise, test.preds, test.labels)
+p.stepwise
+```
+
+```{r}
+plot(stepwise$anova$AIC, xlab="Step", ylab="AIC")
+```
+
+## Forward stagewise
+```{r}
+library(lars)
+X <- as.matrix(df[,2:135])
+stagewise <- lars(X, df$ozone, type="forward.stagewise")
+stagewise$beta[825,]
+```
+
+```{r}
+rsquared <- function(test.preds, test.labels) {
+    return(round(cor(test.preds, test.labels)^2, 3))
+}
+plot.linear.model2 <- function(model, test.preds = NULL, test.labels = NULL, 
+                            test.only = FALSE) {
+    # ensure that model is interpreted as a GLM
+    pred <- predict.lars(stagewise, X, type="fit")$fit[,825]
+    obs <- df$ozone
+    if (test.only) {
+        # plot only the results for the test set
+        plot.df <- NULL
+        plot.res.df <- NULL
+    } else {
+        plot.df <- data.frame("Fitted_Values" = pred, "Actual_Values" = obs, 
+                                "DataSet" = "training")
+        model.residuals <- obs - pred
+        plot.res.df <- data.frame("x" = obs, "y" = pred, 
+                        "x1" = obs, "y2" = pred + model.residuals,
+                        "DataSet" = "training")
+    }
+    r.squared <- NULL
+    if (!is.null(test.preds) && !is.null(test.labels)) {
+        # store predicted points: 
+        test.df <- data.frame("Fitted_Values" = test.preds, 
+                            "Actual_Values" = test.labels, "DataSet" = "test")
+        # store residuals for predictions on the test data
+        test.residuals <- test.labels - test.preds
+        test.res.df <- data.frame("x" = test.labels, "y" = test.preds,
+                        "x1" = test.labels, "y2" = test.preds + test.residuals,
+                         "DataSet" = "test")
+        # append to existing data
+        plot.df <- rbind(plot.df, test.df)
+        plot.res.df <- rbind(plot.res.df, test.res.df)
+        # annotate model with R^2 value
+        r.squared <- rsquared(test.preds, test.labels)
+    }
+    #######
+    library(ggplot2)
+    p <- ggplot() + 
+        # plot training samples
+        geom_point(data = plot.df, 
+            aes(x = Actual_Values, y = Fitted_Values, color = DataSet)) +
+        # plot residuals
+        geom_segment(data = plot.res.df, alpha = 0.2,
+            aes(x = x, y = y, xend = x1, yend = y2, group = DataSet)) +
+        # plot optimal regressor
+        geom_abline(color = "red", slope = 1) +
+        xlim(-1.5,3.5)
+    if (!is.null(r.squared)) {
+        # plot r squared of predictions
+        max.val <- max(plot.df$Actual_Values, plot.df$Fitted_Values)
+        x.pos <- 0.2 * max.val
+        y.pos <- 0.9 * max.val
+        label <- paste0("R^2: ", r.squared)
+        p <- p + annotate("text", x = x.pos, y = y.pos, label = label, size = 5)
+    }
+    return(p)
+}
+```
+
+```{r}
+X_test <- as.matrix(df[,2:135])
+test.preds <- predict.lars(stagewise, X_test, type="fit")$fit[,825]
+test.labels <- df$ozone
+p.stagewise <- plot.linear.model2(stagewise, test.preds, test.labels)
+p.stagewise
+```
+
+```{r}
+plot(stagewise, xvar="step", breaks=FALSE)
+```
+
+## LAR
+```{r}
+LAR <- lars(X, df$ozone, type="lar")
+LAR$beta[135,]
+```
+
+```{r}
+rsquared <- function(test.preds, test.labels) {
+    return(round(cor(test.preds, test.labels)^2, 3))
+}
+plot.linear.model6 <- function(model, test.preds = NULL, test.labels = NULL, 
+                            test.only = FALSE) {
+    # ensure that model is interpreted as a GLM
+    pred <- predict.lars(LAR, X, type="fit")$fit[,135]
+    obs <- df$ozone
+    if (test.only) {
+        # plot only the results for the test set
+        plot.df <- NULL
+        plot.res.df <- NULL
+    } else {
+        plot.df <- data.frame("Fitted_Values" = pred, "Actual_Values" = obs, 
+                                "DataSet" = "training")
+        model.residuals <- obs - pred
+        plot.res.df <- data.frame("x" = obs, "y" = pred, 
+                        "x1" = obs, "y2" = pred + model.residuals,
+                        "DataSet" = "training")
+    }
+    r.squared <- NULL
+    if (!is.null(test.preds) && !is.null(test.labels)) {
+        # store predicted points: 
+        test.df <- data.frame("Fitted_Values" = test.preds, 
+                            "Actual_Values" = test.labels, "DataSet" = "test")
+        # store residuals for predictions on the test data
+        test.residuals <- test.labels - test.preds
+        test.res.df <- data.frame("x" = test.labels, "y" = test.preds,
+                        "x1" = test.labels, "y2" = test.preds + test.residuals,
+                         "DataSet" = "test")
+        # append to existing data
+        plot.df <- rbind(plot.df, test.df)
+        plot.res.df <- rbind(plot.res.df, test.res.df)
+        # annotate model with R^2 value
+        r.squared <- rsquared(test.preds, test.labels)
+    }
+    #######
+    library(ggplot2)
+    p <- ggplot() + 
+        # plot training samples
+        geom_point(data = plot.df, 
+            aes(x = Actual_Values, y = Fitted_Values, color = DataSet)) +
+        # plot residuals
+        geom_segment(data = plot.res.df, alpha = 0.2,
+            aes(x = x, y = y, xend = x1, yend = y2, group = DataSet)) +
+        # plot optimal regressor
+        geom_abline(color = "red", slope = 1) +
+        xlim(-1.5,3.5)
+    if (!is.null(r.squared)) {
+        # plot r squared of predictions
+        max.val <- max(plot.df$Actual_Values, plot.df$Fitted_Values)
+        x.pos <- 0.2 * max.val
+        y.pos <- 0.9 * max.val
+        label <- paste0("R^2: ", r.squared)
+        p <- p + annotate("text", x = x.pos, y = y.pos, label = label, size = 5)
+    }
+    return(p)
+}
+```
+
+```{r}
+test.preds <- predict.lars(LAR, X_test, type="fit")$fit[,135]
+test.labels <- df$ozone
+p.LAR <- plot.linear.model6(LAR, test.preds, test.labels)
+p.LAR
+```
+```{r}
+plot(LAR, xvar="step", breaks=FALSE)
+```
+
+
+## Ridge
+```{r}
+set.seed(10)
+library(MASS)
+ridge_cv <- cv.glmnet(X, df$ozone, type.measure="mse", alpha=0, family="gaussian")
+plot(ridge_cv)
+```
+
+```{r}
+ridge_cv$lambda.min
+ridge_best <- glmnet(X, df$ozone, alpha=0, lambda = ridge_cv$lambda.min)
+```
+
+```{r}
+ridge_best$beta[,1]
+```
+
+
+```{r}
+rsquared <- function(test.preds, test.labels) {
+    return(round(cor(test.preds, test.labels)^2, 3))
+}
+plot.linear.model3 <- function(model, test.preds = NULL, test.labels = NULL, 
+                            test.only = FALSE) {
+    # ensure that model is interpreted as a GLM
+    pred <- predict(ridge_best, s=ridge_cv$lambda.min, newx=X)[,1]
+    obs <- df$ozone
+    if (test.only) {
+        # plot only the results for the test set
+        plot.df <- NULL
+        plot.res.df <- NULL
+    } else {
+        plot.df <- data.frame("Fitted_Values" = pred, "Actual_Values" = obs, 
+                                "DataSet" = "training")
+        model.residuals <- obs - pred
+        plot.res.df <- data.frame("x" = obs, "y" = pred, 
+                        "x1" = obs, "y2" = pred + model.residuals,
+                        "DataSet" = "training")
+    }
+    r.squared <- NULL
+    if (!is.null(test.preds) && !is.null(test.labels)) {
+        # store predicted points: 
+        test.df <- data.frame("Fitted_Values" = test.preds, 
+                            "Actual_Values" = test.labels, "DataSet" = "test")
+        # store residuals for predictions on the test data
+        test.residuals <- test.labels - test.preds
+        test.res.df <- data.frame("x" = test.labels, "y" = test.preds,
+                        "x1" = test.labels, "y2" = test.preds + test.residuals,
+                         "DataSet" = "test")
+        # append to existing data
+        plot.df <- rbind(plot.df, test.df)
+        plot.res.df <- rbind(plot.res.df, test.res.df)
+        # annotate model with R^2 value
+        r.squared <- rsquared(test.preds, test.labels)
+    }
+    #######
+    library(ggplot2)
+    p <- ggplot() + 
+        # plot training samples
+        geom_point(data = plot.df, 
+            aes(x = Actual_Values, y = Fitted_Values, color = DataSet)) +
+        # plot residuals
+        geom_segment(data = plot.res.df, alpha = 0.2,
+            aes(x = x, y = y, xend = x1, yend = y2, group = DataSet)) +
+        # plot optimal regressor
+        geom_abline(color = "red", slope = 1) +
+        xlim(-1.5,3.5)
+    if (!is.null(r.squared)) {
+        # plot r squared of predictions
+        max.val <- max(plot.df$Actual_Values, plot.df$Fitted_Values)
+        x.pos <- 0.2 * max.val
+        y.pos <- 0.9 * max.val
+        label <- paste0("R^2: ", r.squared)
+        p <- p + annotate("text", x = x.pos, y = y.pos, label = label, size = 5)
+    }
+    return(p)
+}
+```
+
+```{r}
+test.preds <- predict(ridge_best, s=ridge_cv$lambda.min, newx=X)[,1]
+test.labels <- df$ozone
+p.ridge <- plot.linear.model3(ridge_best, test.preds, test.labels)
+p.ridge
+```
+
+```{r}
+ridge <- glmnet(X, df$ozone, alpha=0)
+plot(ridge, label=TRUE)
+```
+
+
+## Lasso
+```{r}
+lasso_cv <- cv.glmnet(X, df$ozone, type.measure="mse", alpha=1, family="gaussian")
+plot(lasso_cv)
+```
+
+```{r}
+lasso_cv$lambda.min
+lasso_best <- glmnet(X, df$ozone, alpha=1, lambda = lasso_cv$lambda.min)
+```
+
+```{r}
+lasso_best$beta[,1][lasso_best$beta[,1]!=0]
+```
+
+
+```{r}
+rsquared <- function(test.preds, test.labels) {
+    return(round(cor(test.preds, test.labels)^2, 3))
+}
+plot.linear.model4 <- function(model, test.preds = NULL, test.labels = NULL, 
+                            test.only = FALSE) {
+    # ensure that model is interpreted as a GLM
+    pred <- predict(lasso_best, s=lasso_cv$lambda.min, newx=X)[,1]
+    obs <- df$ozone
+    if (test.only) {
+        # plot only the results for the test set
+        plot.df <- NULL
+        plot.res.df <- NULL
+    } else {
+        plot.df <- data.frame("Fitted_Values" = pred, "Actual_Values" = obs, 
+                                "DataSet" = "training")
+        model.residuals <- obs - pred
+        plot.res.df <- data.frame("x" = obs, "y" = pred, 
+                        "x1" = obs, "y2" = pred + model.residuals,
+                        "DataSet" = "training")
+    }
+    r.squared <- NULL
+    if (!is.null(test.preds) && !is.null(test.labels)) {
+        # store predicted points: 
+        test.df <- data.frame("Fitted_Values" = test.preds, 
+                            "Actual_Values" = test.labels, "DataSet" = "test")
+        # store residuals for predi_tions on the test data
+        test.residuals <- test.labels - test.preds
+        test.res.df <- data.frame("x" = test.labels, "y" = test.preds,
+                        "x1" = test.labels, "y2" = test.preds + test.residuals,
+                         "DataSet" = "test")
+        # append to existing data
+        plot.df <- rbind(plot.df, test.df)
+        plot.res.df <- rbind(plot.res.df, test.res.df)
+        # annotate model with R^2 value
+        r.squared <- rsquared(test.preds, test.labels)
+    }
+    #######
+    library(ggplot2)
+    p <- ggplot() + 
+        # plot training samples
+        geom_point(data = plot.df, 
+            aes(x = Actual_Values, y = Fitted_Values, color = DataSet)) +
+        # plot residuals
+        geom_segment(data = plot.res.df, alpha = 0.2,
+            aes(x = x, y = y, xend = x1, yend = y2, group = DataSet)) +
+        # plot optimal regressor
+        geom_abline(color = "red", slope = 1) +
+        xlim(-1.5,3.5)
+    if (!is.null(r.squared)) {
+        # plot r squared of predictions
+        max.val <- max(plot.df$Actual_Values, plot.df$Fitted_Values)
+        x.pos <- 0.2 * max.val
+        y.pos <- 0.9 * max.val
+        label <- paste0("R^2: ", r.squared)
+        p <- p + annotate("text", x = x.pos, y = y.pos, label = label, size = 5)
+    }
+    return(p)
+}
+```
+
+```{r}
+test.preds <- predict(lasso_best, s=lasso_cv$lambda.min, newx=X)[,1]
+test.labels <- df$ozone
+p.lasso <- plot.linear.model4(lasso_best, test.preds, test.labels)
+p.lasso
+```
+
+```{r}
+lasso <- glmnet(X, df$ozone, alpha=1)
+plot(lasso, xvar="norm", label=TRUE)
+```
+
+
+## Elastic net
+```{r}
+alpha <- seq(0.01, 0.99, 0.01)
+best <- list(a=NULL, mse=NULL)
+ 
+for (i in 1:length(alpha)) 
+{
+   cvg <- cv.glmnet(X, df$ozone, family = "gaussian", alpha = alpha[i])
+   best$a <- c(best$a, alpha[i])
+   best$mse <- c(best$mse, min(cvg$cvm))
+}
+ 
+index <- which(best$mse==min(best$mse))
+best_alpha <- best$a[index]
+best_mse <- best$mse[index]
+ 
+cat("alpha:", best_alpha, " mse:", best_mse)
+```
+
+```{r}
+elastic_cv <- cv.glmnet(X, df$ozone, family = "gaussian", alpha = best_alpha)
+plot(elastic_cv)
+```
+
+```{r}
+elastic_cv$lambda.min
+elastic_best <- glmnet(X, df$ozone, family = "gaussian", alpha = best_alpha, lambda = elastic_cv$lambda.min)
+```
+
+```{r}
+elastic_best$beta[,1][elastic_best$beta[,1]!=0]
+```
+
+
+```{r}
+rsquared <- function(test.preds, test.labels) {
+    return(round(cor(test.preds, test.labels)^2, 3))
+}
+plot.linear.model5 <- function(model, test.preds = NULL, test.labels = NULL, 
+                            test.only = FALSE) {
+    # ensure that model is interpreted as a GLM
+    pred <- predict(elastic_best, s=elastic_cv$lambda.min, newx=X)[,1]
+    obs <- df$ozone
+    if (test.only) {
+        # plot only the results for the test set
+        plot.df <- NULL
+        plot.res.df <- NULL
+    } else {
+        plot.df <- data.frame("Fitted_Values" = pred, "Actual_Values" = obs, 
+                                "DataSet" = "training")
+        model.residuals <- obs - pred
+        plot.res.df <- data.frame("x" = obs, "y" = pred, 
+                        "x1" = obs, "y2" = pred + model.residuals,
+                        "DataSet" = "training")
+    }
+    r.squared <- NULL
+    if (!is.null(test.preds) && !is.null(test.labels)) {
+        # store predicted points: 
+        test.df <- data.frame("Fitted_Values" = test.preds, 
+                            "Actual_Values" = test.labels, "DataSet" = "test")
+        # store residuals for predictions on the test data
+        test.residuals <- test.labels - test.preds
+        test.res.df <- data.frame("x" = test.labels, "y" = test.preds,
+                        "x1" = test.labels, "y2" = test.preds + test.residuals,
+                         "DataSet" = "test")
+        # append to existing data
+        plot.df <- rbind(plot.df, test.df)
+        plot.res.df <- rbind(plot.res.df, test.res.df)
+        # annotate model with R^2 value
+        r.squared <- rsquared(test.preds, test.labels)
+    }
+    #######
+    library(ggplot2)
+    p <- ggplot() + 
+        # plot training samples
+        geom_point(data = plot.df, 
+            aes(x = Actual_Values, y = Fitted_Values, color = DataSet)) +
+        # plot residuals
+        geom_segment(data = plot.res.df, alpha = 0.2,
+            aes(x = x, y = y, xend = x1, yend = y2, group = DataSet)) +
+        # plot optimal regressor
+        geom_abline(color = "red", slope = 1) +
+        xlim(-1.5,3.5)
+    if (!is.null(r.squared)) {
+        # plot r squared of predictions
+        max.val <- max(plot.df$Actual_Values, plot.df$Fitted_Values)
+        x.pos <- 0.2 * max.val
+        y.pos <- 0.9 * max.val
+        label <- paste0("R^2: ", r.squared)
+        p <- p + annotate("text", x = x.pos, y = y.pos, label = label, size = 5)
+    }
+    return(p)
+}
+```
+
+```{r}
+test.preds <- predict(elastic_best, s=elastic_cv$lambda.min, newx=X)[,1]
+test.labels <- df$ozone
+p.elastic <- plot.linear.model5(elastic_best, test.preds, test.labels)
+p.elastic
+```
+```{r}
+elastic <- glmnet(X, df$ozone, alpha=best_alpha)
+plot(elastic, label=TRUE)
+```
+
+
+## 10-fold cross validation for prediction error
+```{r}
+library(caret)
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+```
+
+## Full model
+```{r}
+cv.full <- train(ozone~., data=df, method="lm", trControl=train.control)
+cv.full$results
+```
+
+## Forward-stepwise
+```{r}
+cv.forward <- train(ozone~., data=df, method="lmStepAIC", trControl=train.control, direction="forward")
+cv.forward$results
+```
+
+## Backward stepwise
+```{r}
+cv.backward <- train(ozone~., data=df, method="lmStepAIC", trControl=train.control, direction="backward")
+cv.backward$results
+```
+
+## Stepwise
+```{r}
+cv.stepwise <- train(ozone~., data=df, method="lmStepAIC", trControl=train.control, direction="both")
+cv.stepwise$results
+```
+
+## Forward stagewise
+```{r}
+cv.stagewise <- train(ozone~., data=df, method="lars", trControl=train.control,type="forward.stagewise")
+cv.stagewise$results
+```
+
+## Ridge
+```{r}
+cv.ridge <- train(ozone~., data = df, method = "glmnet", trControl = train.control, tuneGrid = data.frame(alpha=0, lambda=seq(0.001, 1, length = 1000)))
+cv.ridge$results
+```
+```{r}
+cv.ridge$bestTune
+```
+
+```{r}
+cv.ridge$results[640,]
+```
+
+## Lasso
+```{r}
+cv.lasso <- train(ozone~., data = df, method = "glmnet", trControl = train.control, tuneGrid = data.frame(alpha=1, lambda=seq(0.001, 1, length = 1000)))
+cv.lasso$results
+```
+```{r}
+cv.lasso$bestTune
+```
+
+## Elastic net
+```{r}
+cv.elastic <- train(ozone~., data = df, method = "glmnet", trControl = train.control, tuneGrid = expand.grid(alpha = seq(0.01, 0.99, by=0.01),lambda = seq(0.001, 1, length = 1000)))
+cv.elastic$results
+```
+
+```{r}
+cv.elastic$bestTune
+```
+```{r}
+cv.elastic$results[98041,]
+```
+
+## LAR
+```{r}
+cv.LAR <- train(ozone~., data=df, method="lars", trControl=train.control,type="lar")
+cv.LAR$results
+```
+
+```{r}
+df <- data.frame(method=c("Full Model","Forward-stepwise","Backward-stepwise", "Stepwise", "Forward Stagewise", "Ridge", "Lasso", "Elastic Net", "LAR"), min=c(0.6104, 0.6361, 0.6034, 0.6003, 0.6257, 0.3919, 0.3395, 0.3945, 0.4797), max=c(1.264, 0.9693, 0.98, 1.1095, 0.7837, 0.5867, 0.5845, 0.5529, 0.7631), error_rate=c(0.9371,0.8027,0.7917, 0.8549, 0.7047, 0.4893, 0.4620, 0.4737, 0.6214))
+library(ggplot2)
+ggplot(df, aes(y=method))+
+  geom_linerange(aes(xmin=min,xmax=max),linetype=1,color="black")+
+  geom_point(aes(x=error_rate),size=4,color="red")+
+  theme_bw()+
+  labs(x="RMSE",y="Method")+
+  theme(axis.text=element_text(size=14),
+        axis.title=element_text(size=16))
+```
+
+```{r}
+df <- data.frame(method=c("Full Model","Forward-stepwise","Backward-stepwise", "Stepwise", "Forward Stagewise", "Ridge", "Lasso", "Elastic Net", "LAR"), min=c(0.2812, 0.4988, 0.4191, 0.4199, 0.5713, 0.7002, 0.7173, 0.7139, 0.6), max=c(0.7182, 0.6386, 0.7371, 0.6435, 0.6823, 0.852, 0.9027, 0.8705, 0.782), error_rate=c(0.4997, 0.5687, 0.5781, 0.5317, 0.6268, 0.7761, 0.8100, 0.7922, 0.6910))
+library(ggplot2)
+ggplot(df, aes(y=method))+
+  geom_linerange(aes(xmin=min,xmax=max),linetype=1,color="black")+
+  geom_point(aes(x=error_rate),size=4,color="red")+
+  theme_bw()+
+  labs(x="R^2",y="Method")+
+  theme(axis.text=element_text(size=14),
+        axis.title=element_text(size=16))
+```
+
+
