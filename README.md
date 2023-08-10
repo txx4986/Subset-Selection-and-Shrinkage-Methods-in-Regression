@@ -6,4 +6,4 @@ In the summer of 2022, I was assigned to a group of six to research subset selec
 4. Numerical Simulations to compare the performance of the various subset selection and shrinkage methods on different cases
 5. Applying the various subset selection and shrinkage methods to the Ozone Interaction Dataset
 
-Our research was documented using LaTeX and a video presentation was recorded to share about our research. The group research project was awarded a first-class mark.
+Our research was documented using LaTeX and a video presentation was recorded to share about our research. The group research project was awarded distinction.
